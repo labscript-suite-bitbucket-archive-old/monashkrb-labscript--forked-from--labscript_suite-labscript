@@ -11,7 +11,13 @@
 #                                                                   #
 #####################################################################
 
-from __future__ import division
+from __future__ import division, unicode_literals, print_function, absolute_import
+from labscript_utils import PY2
+if PY2:
+    str = unicode
+    import __builtin__ as builtins
+else:
+    import builtins
 import os
 import sys
 import subprocess
@@ -33,7 +39,7 @@ from labscript_utils import check_version
 check_version('qtutils', '2.0.0', '3.0.0')
 from pylab import *
 
-import functions
+import labscript.functions as functions
 try:
     from labscript_utils.unitconversions import *
 except ImportError:
@@ -51,9 +57,8 @@ GHz = 1e9
 # We need to backup the builtins as they are now, as well as have a
 # reference to the actual builtins dictionary (which will change as we
 # add globals and devices to it), so that we can restore the builtins
-# when labscript_cleanup() is called. 
-import __builtin__
-_builtins_dict = __builtin__.__dict__
+# when labscript_cleanup() is called.
+_builtins_dict = builtins.__dict__
 _existing_builtins_dict = _builtins_dict.copy()
     
 # Startupinfo, for ensuring subprocesses don't launch with a visible command window:
@@ -64,7 +69,7 @@ else:
     startupinfo = None
         
         
-class config:
+class config(object):
     suppress_mild_warnings = True
     suppress_all_warnings = False
     compression = 'gzip'  # set to 'gzip' for compression 
@@ -213,7 +218,7 @@ class Device(object):
                                      
         try:
             # Test that name is a valid Python variable name:
-            exec '%s = None'%name
+            exec('%s = None'%name)
             assert '.' not in name
         except:
             raise ValueError('%s is not a valid Python variable name.'%name)
@@ -983,8 +988,8 @@ class Output(Device):
             unit_conversion_parameters = {}
         self.unit_conversion_class = unit_conversion_class
         self.set_properties(unit_conversion_parameters,
-                            {'unit_conversion_parameters': unit_conversion_parameters.keys()})
-        
+                            {'unit_conversion_parameters': list(unit_conversion_parameters.keys())})
+
         # Instantiate the calibration
         if unit_conversion_class is not None:
             self.calibration = unit_conversion_class(unit_conversion_parameters)
@@ -1123,7 +1128,7 @@ class Output(Device):
             self.add_instruction(self.t0, self.default_value) 
         # Check that ramps have instructions following them.
         # If they don't, insert an instruction telling them to hold their final value.
-        for instruction in self.instructions.values():
+        for instruction in list(self.instructions.values()):
             if isinstance(instruction, dict) and instruction['end time'] not in self.instructions.keys():
                 self.add_instruction(instruction['end time'], instruction['function'](instruction['end time']-instruction['initial time']), instruction['units'])
         # Checks for trigger times:
@@ -1183,7 +1188,7 @@ class Output(Device):
         """If this function is being called, it means that the parent
         Pseudoclock has requested a list of times that this output changes
         state."""        
-        times = self.instructions.keys()
+        times = list(self.instructions.keys())
         times.sort()
 
         current_dict_time = None
@@ -1651,7 +1656,7 @@ class Shutter(DigitalOut):
 
     def generate_code(self, hdf5_file):
         classname = self.__class__.__name__
-        calibration_table_dtypes = [('name','a256'), ('open_delay',float), ('close_delay',float)]
+        calibration_table_dtypes = {'names': ['name', 'open_delay', 'close_delay'], 'formats': ['a256', float, float]}
         if classname not in hdf5_file['calibrations']:
             hdf5_file['calibrations'].create_dataset(classname, (0,), dtype=calibration_table_dtypes, maxshape=(None,))
         metadata = (self.name,self.open_delay,self.close_delay)
@@ -1893,7 +1898,7 @@ class LabscriptError(Exception):
 
 def save_time_markers(hdf5_file):
     time_markers = compiler.time_markers
-    dtypes = [('label','a256'), ('time', float), ('color', '(1,3)uint8')]
+    dtypes = {'names': ['label', 'time', 'color'], 'formats': ['a256', float, '(1,3)uint8']}
     data_array = zeros(len(time_markers), dtype=dtypes)
     for i, t in enumerate(time_markers):
         data_array[i] = time_markers[t]["label"], t, time_markers[t]["color"]
@@ -1933,11 +1938,9 @@ def generate_connection_table(hdf5_file):
                                  serialised_properties))
     
     connection_table.sort()
-    vlenstring = h5py.special_dtype(vlen=unicode)
-    connection_table_dtypes = [('name','a256'), ('class','a256'), ('parent','a256'), ('parent port','a256'),
-                               ('unit conversion class','a256'), ('unit conversion params', vlenstring),
-                               ('BLACS_connection','a'+str(max_BLACS_conn_length)),
-                               ('properties', vlenstring)]
+    vlenstring = h5py.special_dtype(vlen=str)
+    connection_table_dtypes = {'names': ['name', 'class', 'parent', 'parent port', 'unit conversion class', 'unit conversion params', 'BLACS_connection', 'properties'],
+                               'formats':['a256', 'a256','a256', 'a256', 'a256', vlenstring, 'a'+str(max_BLACS_conn_length), vlenstring]}
     connection_table_array = empty(len(connection_table),dtype=connection_table_dtypes)
     for i, row in enumerate(connection_table):
         connection_table_array[i] = row
@@ -1979,7 +1982,7 @@ def save_labscripts(hdf5_file):
                                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, startupinfo=startupinfo)
                         info, err = process.communicate()
                         if info or err:
-                            hdf5_file[save_path].attrs['hg ' + command[0]] = info + '\n' + err
+                            hdf5_file[save_path].attrs['hg ' + str(command[0])] = str(info) + '\n' + str(err)
     except ImportError:
         pass
     except WindowsError if os.name == 'nt' else None:
@@ -2003,7 +2006,7 @@ def write_device_properties(hdf5_file):
 
 
 def generate_wait_table(hdf5_file):
-    dtypes = [('label','a256'), ('time', float), ('timeout', float)]
+    dtypes = {'names': ['label', 'time', 'timeout'], 'formats': ['a256', float, float]}
     data_array = zeros(len(compiler.wait_table), dtype=dtypes)
     for i, t in enumerate(sorted(compiler.wait_table)):
         label, timeout = compiler.wait_table[t]
@@ -2211,7 +2214,7 @@ def labscript_cleanup():
     compiler.wait_delay = 0
     compiler.time_markers = {}
     
-class compiler:
+class compiler(object):
     # The labscript file being compiled:
     labscript_file = None
     # All defined devices:
